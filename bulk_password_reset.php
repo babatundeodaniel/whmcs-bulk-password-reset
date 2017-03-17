@@ -12,15 +12,17 @@
  *
 
 
- * @author     Achintha Samindika <achintha@outlook.com>
+ * @author     Daniel Babatunde forked from
 
- * @copyright  Copyright (c) Achintha Samindika 2013
+ * @copyright  Copyright (c) Babatunde 2017
 
  * @license    http://www.whmcs.com/license/ WHMCS Eula
 
  * @version    $Id$
 
  * @link       http://www.whmcs.com/
+
+ * @compatible WHMCS > 7.0
 
  */
 
@@ -34,7 +36,6 @@ if (!defined("WHMCS"))
 
 
 function bulk_password_reset_config() {
-
     $configarray = array(
 
     "name" => "Bulk Password Reset Module",
@@ -43,7 +44,7 @@ function bulk_password_reset_config() {
 
     "version" => "1.0",
 
-    "author" => "Achintha Samindika",
+    "author" => "Daniel Babatunde",
 
     "language" => "english",
 
@@ -63,14 +64,56 @@ function bulk_password_reset_config() {
 function bulk_password_reset_output($vars) {
 
     $adminuser = $vars['adminuser'];
-
     if($vars['enable'] === 'on'){
 
-        if($vars['resetclient'] === 'on'){
-            clients_password_reset($adminuser);
-        }
-        if($vars['resetproduct'] === 'on'){
-            products_password_reset($adminuser); 
+        if(isset($_POST['reset_selected'])){
+            print_r($_POST);
+            $clients = $_POST['client'];
+            clients_password_reset($adminuser, $clients);
+        }elseif(isset($_POST['reset_all'])){
+            if($vars['enable'] === 'on'){
+                if($vars['resetclient'] === 'on'){
+                    clients_password_reset($adminuser);
+                }
+                if($vars['resetproduct'] === 'on'){
+                    products_password_reset($adminuser);
+                }
+            }
+        }else{
+            // Define parameters
+            $command = 'GetClients';
+
+            $postData = array(
+                //'search' => 'example.com',
+            );
+            $adminUsername = $adminuser;
+
+            $results = localAPI($command, $adminUsername);
+            //print_r($results);
+            if($results['result'] == 'success'){
+                echo "<form method='post' action='".$vars['modulelink']."'> <div class=\"row client-dropdown-container\">";
+                echo "<select id='select-clients' name='client[]' class='col-md-6' placeholder=\"Select a client...\" multiple>";
+                foreach ($results['clients']['client'] as $client){
+                    echo "<option value='".$client['id']."'>".$client['lastname']." ".$client['email']."</option>";
+                }
+                echo "</select>";
+                echo "<input class='btn btn-primary' name='reset_selected' type='submit' value='Reset selected' />";
+                echo '<button class="btn btn-info"> Reset for all</button>';
+                echo '</div></form>';
+                echo "<script>
+				$('#select-clients').selectize({
+                    delimiter: ',',
+                    persist: false,
+                    create: function(input) {
+                        return {
+                            value: input,
+                            text: input
+                        }
+                    }
+				});
+				</script>";
+            }
+
         }
     }
     else{
@@ -80,37 +123,53 @@ function bulk_password_reset_output($vars) {
 }
 
 
-function clients_password_reset($adminuser){
-    
-    $command = "getclients";
-    $values['limitnum'] = 10000;
-    $api_clients = localAPI($command,$values,$adminuser);
+function clients_password_reset($adminuser, array $clients = null){
+    $val_from_args = false;
+    if($clients !== null){
+        $val_from_args = true;
+    }else{
+        $command = "getclients";
+        $values['limitnum'] = 10000;
+        $api_clients = localAPI($command,$values,$adminuser);
 
-    if(!empty($api_clients['clients']['client'])){
-        $clients = $api_clients['clients']['client'];
+        if(!empty($api_clients['clients']['client'])){
+            $clients = $api_clients['clients']['client'];
+        }
+        else{
+            return false;
+        }
     }
-    else{
-        return false;
-    }
+
 
     if( !empty($clients) && is_array($clients)){
 
         foreach ($clients as $client) {
-
             $pw_command = "updateclient";
-            $pw_values["clientid"] = $client['id'];
+
+            if($val_from_args){
+                $pw_values["clientid"] = $client;
+            }else{
+                $pw_values["clientid"] = $client['id'];
+            }
+
+
             $pw_values["password2"] = generate_password(10);
-            
             $pw_results = localAPI($pw_command, $pw_values, $adminuser);
             
             echo 'Reset password for: ' . $client['email'];
+            if($val_from_args){
+                echo 'Reset password for: ' . $client;
+            }else{
+                echo 'Reset password for: ' . $client['email'];
+            }
 
             if(!empty($pw_results['result'])){
                 if($pw_results['result'] === 'success'){
                     echo ' Success <br>';
 
                     $email_command = "sendemail";
-                    $email_values["messagename"] = "Automated Password Reset";
+                    //$email_values["messagename"] = "Automated Password Reset";
+                    $email_values["messagename"] = "Automated Password Reset by Admin";
                     $email_values["id"] = $client['id'];
                      
                     $email_results = localAPI($email_command, $email_values, $adminuser);
@@ -119,7 +178,7 @@ function clients_password_reset($adminuser){
                     echo ' Failed ('.$pw_results['result'].') <br>';
                 }
             }
-             
+
         }
 
     }
@@ -127,7 +186,7 @@ function clients_password_reset($adminuser){
 }
 
 
-function products_password_reset($adminuser){
+function products_password_reset($adminuser, array $products = []){
 
     $command = "getclientsproducts";
 
